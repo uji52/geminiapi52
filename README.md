@@ -86,6 +86,35 @@ flowchart TD
 # app/build/outputs/apk/debug/app-debug.apk
 ```
 
+---
+
+## 📶 Wi-Fi 経由のワイヤレスインストール (`adb-deploy`)
+
+Android 11+ の「ワイヤレスデバッグ」を利用して、PC と端末を Wi-Fi でペアリング・接続し、ビルドした APK を `adb install -r` するための汎用ツール [`scripts/adb-wireless-deploy.sh`](file:///home/uji52/work/repo/geminiapi52/scripts/adb-wireless-deploy.sh) を同梱しています。
+本プロジェクトに限らず、**どの Android アプリプロジェクトや任意の APK ファイルに対しても共通で使用できます**。
+
+### グローバルコマンドとして利用可能
+`~/.local/bin/adb-deploy` として配置されているため、どのディレクトリからでも実行可能です：
+
+```bash
+# 対話モード（自動でペアリング・接続・最新APKの検出/ビルド案内を行います）
+adb-deploy
+
+# ペアリング + 接続 + インストールを一括実行
+adb-deploy -p 192.168.1.50:37123 123456 -c 192.168.1.50:41235
+
+# ペアリング済み端末に接続してインストール
+adb-deploy -c 192.168.1.50:41235
+
+# ビルド（./gradlew assembleDebug）を実行してからインストール & 自動起動
+adb-deploy --build --launch
+
+# 任意の APK を指定してインストール
+adb-deploy path/to/any-app.apk
+```
+
+---
+
 ### 利用前の準備
 1. **Gemini API Key の取得**:
    - [Google AI Studio](https://aistudio.google.com/app/apikey) にアクセスして API キーを取得します。
