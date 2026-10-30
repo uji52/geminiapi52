@@ -1,0 +1,60 @@
+# Built application files
+*.apk
+*.aar
+*.aab
+
+# Files for the ART/Dalvik VM
+*.dex
+
+# Java class files
+*.class
+
+# Generated files
+bin/
+gen/
+out/
+build/
+.gradle/
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+.shelf/
+
+# Android Studio Navigation editor temp files
+.navigation/
+
+# Android Studio captures folder
+captures/
+
+# Google Services & Firebase (NEVER commit credentials)
+google-services.json
+GoogleService-Info.plist
+
+# Local configuration file (sdk path, api keys, local properties)
+local.properties
+
+# Keystore and signing keys (NEVER commit signing keys)
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+
+# Environment files and credentials (NEVER commit API keys or tokens)
+.env
+.env.*
+*.secrets
+secrets.xml
+api_keys.json
+credentials.json
+
+# External native build folder
+.cxx/
+.externalNativeBuild/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
