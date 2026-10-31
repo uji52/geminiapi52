@@ -21,7 +21,7 @@ sealed class GeminiStepResult {
 
 class GeminiApiClient(
     private val apiKey: String,
-    private val model: String = "gemini-2.5-flash"
+    private val model: String = "gemini-3.8-flash"
 ) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
@@ -31,9 +31,60 @@ class GeminiApiClient(
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
+    suspend fun fetchAvailableModels(): Result<List<String>> = withContext(Dispatchers.IO) {
+        try {
+            if (apiKey.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("API Key is required to list models"))
+            }
+            val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey"
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("x-goog-api-key", apiKey)
+                .get()
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string() ?: ""
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(IOException("Failed to fetch models (${response.code}): $body"))
+                }
+                val json = JSONObject(body)
+                val modelsArray = json.optJSONArray("models") ?: JSONArray()
+                val list = mutableListOf<String>()
+                for (i in 0 until modelsArray.length()) {
+                    val m = modelsArray.getJSONObject(i)
+                    val supportedMethods = m.optJSONArray("supportedGenerationMethods") ?: JSONArray()
+                    var supportsGenerateContent = false
+                    for (j in 0 until supportedMethods.length()) {
+                        if (supportedMethods.getString(j) == "generateContent") {
+                            supportsGenerateContent = true
+                            break
+                        }
+                    }
+                    if (supportsGenerateContent) {
+                        val rawName = m.getString("name") // e.g. "models/gemini-3.8-flash"
+                        list.add(rawName.removePrefix("models/"))
+                    }
+                }
+                // Sort with preference for latest flash/pro models
+                val sorted = list.sortedWith(
+                    compareByDescending<String> { it.contains("3.8") }
+                        .thenByDescending { it.contains("3.6") }
+                        .thenByDescending { it.contains("3.5") }
+                        .thenByDescending { it.contains("flash") }
+                        .thenBy { it }
+                )
+                Result.success(sorted)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun verifyApiKey(): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+            val cleanModel = model.trim().removePrefix("models/")
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$cleanModel:generateContent?key=$apiKey"
             val payload = JSONObject().apply {
                 val contents = JSONArray().apply {
                     put(JSONObject().apply {
@@ -48,15 +99,21 @@ class GeminiApiClient(
 
             val request = Request.Builder()
                 .url(url)
+                .addHeader("x-goog-api-key", apiKey)
                 .post(payload.toString().toRequestBody(jsonMediaType))
                 .build()
 
             client.newCall(request).execute().use { response ->
                 val body = response.body?.string() ?: ""
                 if (response.isSuccessful) {
-                    Result.success("Gemini API connection OK (Model: $model)")
+                    Result.success("Gemini API connection OK (Model: $cleanModel)")
                 } else {
-                    Result.failure(IOException("Gemini API Error ${response.code}: $body"))
+                    val errorMsg = if (response.code == 404) {
+                        "Model '$cleanModel' is no longer available (404). Please tap 'Fetch Models' or select an active model from the dropdown."
+                    } else {
+                        "Gemini API Error ${response.code}: $body"
+                    }
+                    Result.failure(IOException(errorMsg))
                 }
             }
         } catch (e: Exception) {
@@ -69,7 +126,8 @@ class GeminiApiClient(
         systemPrompt: String
     ): Result<List<GeminiStepResult>> = withContext(Dispatchers.IO) {
         try {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+            val cleanModel = model.trim().removePrefix("models/")
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$cleanModel:generateContent?key=$apiKey"
 
             val rootJson = JSONObject().apply {
                 // System Instruction

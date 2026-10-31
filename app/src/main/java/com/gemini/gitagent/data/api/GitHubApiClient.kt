@@ -33,8 +33,8 @@ data class PullRequestResult(
 
 class GitHubApiClient(
     private val token: String,
-    private val owner: String,
-    private val repo: String
+    private val owner: String = "",
+    private val repo: String = ""
 ) {
     private val client = OkHttpClient.Builder().build()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -47,6 +47,54 @@ class GitHubApiClient(
             .addHeader("Accept", "application/vnd.github.v3+json")
             .addHeader("X-GitHub-Api-Version", "2022-11-28")
             .addHeader("User-Agent", "GeminiGitAgent-Android")
+    }
+
+    suspend fun fetchRepositories(targetOwner: String = ""): Result<List<String>> = withContext(Dispatchers.IO) {
+        try {
+            if (token.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("GitHub Token is required to list repositories"))
+            }
+            val effectiveOwner = targetOwner.trim().ifEmpty { owner.trim() }
+            val repoList = mutableListOf<String>()
+
+            // 1. Try authenticated user repos (includes private & organization repos user has access to)
+            val userReposUrl = "$baseUrl/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member"
+            val userRequest = newRequestBuilder(userReposUrl).get().build()
+
+            client.newCall(userRequest).execute().use { response ->
+                val body = response.body?.string() ?: ""
+                if (response.isSuccessful) {
+                    val array = JSONArray(body)
+                    for (i in 0 until array.length()) {
+                        val item = array.getJSONObject(i)
+                        val name = item.getString("name")
+                        val ownerLogin = item.optJSONObject("owner")?.optString("login", "") ?: ""
+                        if (effectiveOwner.isEmpty() || ownerLogin.equals(effectiveOwner, ignoreCase = true)) {
+                            repoList.add(name)
+                        }
+                    }
+                }
+            }
+
+            // 2. If filtered list is empty and an owner was specified, try fetching that owner's public/org repos directly
+            if (repoList.isEmpty() && effectiveOwner.isNotEmpty()) {
+                val ownerUrl = "$baseUrl/users/$effectiveOwner/repos?per_page=100&sort=updated"
+                val ownerRequest = newRequestBuilder(ownerUrl).get().build()
+                client.newCall(ownerRequest).execute().use { response ->
+                    val body = response.body?.string() ?: ""
+                    if (response.isSuccessful) {
+                        val array = JSONArray(body)
+                        for (i in 0 until array.length()) {
+                            repoList.add(array.getJSONObject(i).getString("name"))
+                        }
+                    }
+                }
+            }
+
+            Result.success(repoList.distinct())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     suspend fun verifyRepositoryAccess(): Result<String> = withContext(Dispatchers.IO) {
