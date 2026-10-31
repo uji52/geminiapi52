@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,6 +21,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
@@ -53,8 +56,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gemini.gitagent.ui.AgentLogItem
@@ -69,6 +75,8 @@ fun ChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val listState = rememberLazyListState()
 
     // Auto-scroll to bottom on new log entry
@@ -85,6 +93,7 @@ fun ChatScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .imePadding()
             .padding(12.dp)
     ) {
         // Warning banner if settings are missing
@@ -251,20 +260,33 @@ fun ChatScreen(
                 label = { Text("Task Instruction for Gemini") },
                 placeholder = { Text("例: XXXの不具合を修正してPRを作成して") },
                 maxLines = 4,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
+                }),
                 modifier = Modifier.weight(1f),
                 enabled = !uiState.isRunning
             )
 
             if (uiState.isRunning) {
                 Button(
-                    onClick = { viewModel.stopTask() },
+                    onClick = {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                        viewModel.stopTask()
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
                     Icon(imageVector = Icons.Default.Stop, contentDescription = "Stop")
                 }
             } else {
                 Button(
-                    onClick = { viewModel.runTask() },
+                    onClick = {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                        viewModel.runTask()
+                    },
                     enabled = uiState.prompt.isNotBlank()
                 ) {
                     Icon(imageVector = Icons.Default.Send, contentDescription = "Run")

@@ -7,7 +7,7 @@ import androidx.security.crypto.MasterKey
 
 data class AppSettings(
     val geminiApiKey: String = "",
-    val geminiModel: String = "gemini-3.8-flash",
+    val geminiModel: String = "gemini-3.5-flash",
     val githubToken: String = "",
     val githubOwner: String = "",
     val githubRepo: String = "",
@@ -46,7 +46,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_GITHUB_OWNER = "github_owner"
         private const val KEY_GITHUB_REPO = "github_repo"
         private const val KEY_GITHUB_BASE_BRANCH = "github_base_branch"
-        const val DEFAULT_MODEL = "gemini-3.8-flash"
+        const val DEFAULT_MODEL = "gemini-3.5-flash"
         const val DEFAULT_BRANCH = "master"
     }
 

@@ -15,18 +15,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 val DEFAULT_GEMINI_MODELS = listOf(
-    "gemini-3.8-flash",
-    "gemini-3.8-pro",
-    "gemini-3.6-flash",
     "gemini-3.5-flash",
-    "gemini-4-argon",
-    "gemini-2.5-flash"
+    "gemini-3.5-flash-lite",
+    "gemini-3.8-flash",
+    "gemini-flash-latest",
+    "gemini-3.8-pro",
+    "gemini-4-argon"
 )
 
 data class SettingsUiState(
     val settings: AppSettings = AppSettings(),
     val availableModels: List<String> = DEFAULT_GEMINI_MODELS,
     val isFetchingModels: Boolean = false,
+    val fetchModelsError: String? = null,
     val availableRepositories: List<String> = emptyList(),
     val isFetchingRepos: Boolean = false,
     val fetchReposError: String? = null,
@@ -61,19 +62,24 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             if (debounceMs > 0) {
                 delay(debounceMs)
             }
-            _uiState.value = _uiState.value.copy(isFetchingModels = true)
+            _uiState.value = _uiState.value.copy(isFetchingModels = true, fetchModelsError = null)
             val client = GeminiApiClient(apiKey = apiKey)
             val result = client.fetchAvailableModels()
             if (result.isSuccess) {
                 val models = result.getOrThrow()
-                // Merge with default list, placing active fetched models at top
-                val combined = (models + DEFAULT_GEMINI_MODELS).distinct()
+                val combined = if (models.isNotEmpty()) models else DEFAULT_GEMINI_MODELS
                 _uiState.value = _uiState.value.copy(
                     isFetchingModels = false,
                     availableModels = combined
                 )
             } else {
-                _uiState.value = _uiState.value.copy(isFetchingModels = false)
+                val err = result.exceptionOrNull()?.message ?: "Unknown error"
+                _uiState.value = _uiState.value.copy(
+                    isFetchingModels = false,
+                    fetchModelsError = err,
+                    testMessage = "Models fetch: $err",
+                    isTestSuccess = false
+                )
             }
         }
     }
@@ -128,48 +134,63 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         if (!current.isConfigured) {
             _uiState.value = _uiState.value.copy(
                 testMessage = "Please fill in all required fields (Gemini API Key, GitHub Token, Owner, Repo)",
-                isTestSuccess = false
+                isTestSuccess = false,
+                isTesting = false
             )
             return
         }
 
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isTesting = true, testMessage = "Testing connections...")
+            try {
+                _uiState.value = _uiState.value.copy(isTesting = true, testMessage = "Testing connections...")
 
-            val geminiClient = GeminiApiClient(current.geminiApiKey, current.geminiModel)
-            val geminiResult = geminiClient.verifyApiKey()
+                val geminiClient = GeminiApiClient(current.geminiApiKey, current.geminiModel)
+                val geminiResult = geminiClient.verifyApiKey()
 
-            if (geminiResult.isFailure) {
+                if (geminiResult.isFailure) {
+                    val errMsg = geminiResult.exceptionOrNull()?.message ?: "Unknown error"
+                    _uiState.value = _uiState.value.copy(
+                        isTesting = false,
+                        isTestSuccess = false,
+                        testMessage = "Gemini Connection Failed: $errMsg"
+                    )
+                    // If model failed, attempt to fetch available models
+                    fetchGeminiModels(current.geminiApiKey)
+                    return@launch
+                }
+
+                val githubClient = GitHubApiClient(current.githubToken, current.githubOwner, current.githubRepo)
+                val githubResult = githubClient.verifyRepositoryAccess()
+
+                if (githubResult.isFailure) {
+                    val errMsg = githubResult.exceptionOrNull()?.message ?: "Unknown error"
+                    _uiState.value = _uiState.value.copy(
+                        isTesting = false,
+                        isTestSuccess = false,
+                        testMessage = "GitHub Connection Failed: $errMsg"
+                    )
+                    return@launch
+                }
+
                 _uiState.value = _uiState.value.copy(
                     isTesting = false,
-                    isTestSuccess = false,
-                    testMessage = "Gemini Connection Failed: ${geminiResult.exceptionOrNull()?.message}"
+                    isTestSuccess = true,
+                    testMessage = "Success! Both Gemini API and GitHub repository access are verified."
                 )
-                // If model failed, attempt to fetch available models
                 fetchGeminiModels(current.geminiApiKey)
-                return@launch
-            }
-
-            val githubClient = GitHubApiClient(current.githubToken, current.githubOwner, current.githubRepo)
-            val githubResult = githubClient.verifyRepositoryAccess()
-
-            if (githubResult.isFailure) {
+                fetchRepositories(current.githubToken, current.githubOwner)
+            } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isTesting = false,
                     isTestSuccess = false,
-                    testMessage = "GitHub Connection Failed: ${githubResult.exceptionOrNull()?.message}"
+                    testMessage = "Connection Test Error: ${e.message}"
                 )
-                return@launch
+            } finally {
+                // Ensure isTesting is ALWAYS turned off
+                if (_uiState.value.isTesting) {
+                    _uiState.value = _uiState.value.copy(isTesting = false)
+                }
             }
-
-            _uiState.value = _uiState.value.copy(
-                isTesting = false,
-                isTestSuccess = true,
-                testMessage = "Success! Both Gemini API and GitHub repository access are verified."
-            )
-            // Refresh models and repositories on successful test
-            fetchGeminiModels(current.geminiApiKey)
-            fetchRepositories(current.githubToken, current.githubOwner)
         }
     }
 }

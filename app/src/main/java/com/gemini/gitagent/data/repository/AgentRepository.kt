@@ -76,10 +76,21 @@ class AgentRepository(
                 return@flow
             }
 
-            val steps = stepResult.getOrThrow()
+            val output = stepResult.getOrThrow()
+            val steps = output.results
             if (steps.isEmpty()) {
                 emit(AgentEvent.Error("Empty response from Gemini"))
                 return@flow
+            }
+
+            // Surface any thinking thoughts to status stream
+            val thoughts = steps.filterIsInstance<GeminiStepResult.ThoughtResponse>()
+            for (th in thoughts) {
+                val thoughtPreview = th.thought.trim().replace("\n", " ")
+                if (thoughtPreview.isNotBlank()) {
+                    val preview = if (thoughtPreview.length > 120) thoughtPreview.take(120) + "..." else thoughtPreview
+                    emit(AgentEvent.Status("Thinking: $preview"))
+                }
             }
 
             // Check if there are function calls
@@ -88,35 +99,28 @@ class AgentRepository(
 
             if (functionCalls.isEmpty()) {
                 // Agent finished with text response
-                val finalText = textResponses.joinToString("\n") { it.text }
+                val finalText = if (textResponses.isNotEmpty()) {
+                    textResponses.joinToString("\n") { it.text }
+                } else if (thoughts.isNotEmpty()) {
+                    thoughts.joinToString("\n") { it.thought }
+                } else {
+                    "Task processing complete."
+                }
                 emit(AgentEvent.Completed(finalText))
                 isFinished = true
                 break
             }
 
-            // Record model's function calls in contents history
-            val modelParts = JSONArray()
-            for (fn in functionCalls) {
-                modelParts.put(JSONObject().apply {
-                    put("functionCall", JSONObject().apply {
-                        put("name", fn.functionName)
-                        put("args", fn.args)
-                    })
-                })
-            }
-            // Add any text the model produced along with function calls
-            for (t in textResponses) {
-                modelParts.put(JSONObject().put("text", t.text))
-            }
-            contents.put(JSONObject().apply {
-                put("role", "model")
-                put("parts", modelParts)
-            })
+            // Preserve full model content (including thought parts and signatures) in multi-turn history
+            contents.put(output.rawContent)
 
             // Execute each function call and append function responses
+            val responseParts = JSONArray()
             for (fn in functionCalls) {
                 val toolName = fn.functionName
                 val args = fn.args
+
+                emit(AgentEvent.ToolCall(toolName, args.toString()))
 
                 val (toolResultJson, summaryText) = executeTool(toolName, args)
 
@@ -130,21 +134,22 @@ class AgentRepository(
                     emit(AgentEvent.PullRequestCreated(url, number, title))
                 }
 
-                // Add functionResponse to contents
-                contents.put(JSONObject().apply {
-                    put("role", "function")
-                    put("parts", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("functionResponse", JSONObject().apply {
-                                put("name", toolName)
-                                put("response", JSONObject().apply {
-                                    put("output", toolResultJson)
-                                })
-                            })
+                // Add functionResponse part
+                responseParts.put(JSONObject().apply {
+                    put("functionResponse", JSONObject().apply {
+                        put("name", toolName)
+                        put("response", JSONObject().apply {
+                            put("output", toolResultJson)
                         })
                     })
                 })
             }
+
+            // Append user turn containing all functionResponses (Gemini API requires role='user')
+            contents.put(JSONObject().apply {
+                put("role", "user")
+                put("parts", responseParts)
+            })
         }
 
         if (!isFinished) {
@@ -250,6 +255,30 @@ class AgentRepository(
                     result.put("success", false)
                     result.put("error", err)
                     Pair(result, "Failed to create PR: $err")
+                }
+            }
+            "list_pull_requests" -> {
+                val state = args.optString("state", "open")
+                val prsResult = githubClient.listPullRequests(state)
+                if (prsResult.isSuccess) {
+                    val prs = prsResult.getOrThrow()
+                    val prsArray = JSONArray()
+                    prs.forEach { pr ->
+                        prsArray.put(JSONObject().apply {
+                            put("number", pr.number)
+                            put("html_url", pr.htmlUrl)
+                            put("title", pr.title)
+                            put("state", pr.state)
+                        })
+                    }
+                    result.put("success", true)
+                    result.put("pull_requests", prsArray)
+                    Pair(result, "Found ${prs.size} $state pull requests.")
+                } else {
+                    val err = prsResult.exceptionOrNull()?.message ?: "Error fetching PRs"
+                    result.put("success", false)
+                    result.put("error", err)
+                    Pair(result, "Failed to list PRs: $err")
                 }
             }
             else -> {

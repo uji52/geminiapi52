@@ -11,6 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.TimeUnit
 
 data class GitHubFileResult(
     val path: String,
@@ -36,7 +37,11 @@ class GitHubApiClient(
     private val owner: String = "",
     private val repo: String = ""
 ) {
-    private val client = OkHttpClient.Builder().build()
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .writeTimeout(20, TimeUnit.SECONDS)
+        .build()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val baseUrl = "https://api.github.com"
 
@@ -314,6 +319,35 @@ class GitHubApiClient(
                 } else {
                     Result.failure(IOException("Failed to create Pull Request: ${response.code} $responseBody"))
                 }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun listPullRequests(state: String = "open"): Result<List<PullRequestResult>> = withContext(Dispatchers.IO) {
+        try {
+            val url = "$baseUrl/repos/$owner/$repo/pulls?state=$state&per_page=30"
+            val request = newRequestBuilder(url).get().build()
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string() ?: ""
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(IOException("Failed to list PRs: ${response.code} $responseBody"))
+                }
+                val array = JSONArray(responseBody)
+                val list = mutableListOf<PullRequestResult>()
+                for (i in 0 until array.length()) {
+                    val item = array.getJSONObject(i)
+                    list.add(
+                        PullRequestResult(
+                            number = item.getInt("number"),
+                            htmlUrl = item.getString("html_url"),
+                            title = item.getString("title"),
+                            state = item.optString("state", "open")
+                        )
+                    )
+                }
+                Result.success(list)
             }
         } catch (e: Exception) {
             Result.failure(e)
