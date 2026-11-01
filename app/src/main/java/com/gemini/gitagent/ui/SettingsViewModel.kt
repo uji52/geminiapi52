@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.gemini.gitagent.data.api.GeminiApiClient
 import com.gemini.gitagent.data.api.GitHubApiClient
 import com.gemini.gitagent.data.repository.AppSettings
+import com.gemini.gitagent.data.repository.GeminiModelInfo
 import com.gemini.gitagent.data.repository.SettingsRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -26,6 +27,7 @@ val DEFAULT_GEMINI_MODELS = listOf(
 data class SettingsUiState(
     val settings: AppSettings = AppSettings(),
     val availableModels: List<String> = DEFAULT_GEMINI_MODELS,
+    val availableModelInfos: List<GeminiModelInfo> = DEFAULT_GEMINI_MODELS.map { GeminiModelInfo.fromModelId(it) },
     val isFetchingModels: Boolean = false,
     val fetchModelsError: String? = null,
     val availableRepositories: List<String> = emptyList(),
@@ -67,10 +69,19 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             val result = client.fetchAvailableModels()
             if (result.isSuccess) {
                 val models = result.getOrThrow()
-                val combined = if (models.isNotEmpty()) models else DEFAULT_GEMINI_MODELS
+                val rawList = if (models.isNotEmpty()) models else DEFAULT_GEMINI_MODELS
+                val modelInfos = rawList.map { GeminiModelInfo.fromModelId(it) }
+                    .sortedWith(
+                        compareByDescending<GeminiModelInfo> { it.isRecommended }
+                            .thenByDescending { it.isFreeTier }
+                            .thenByDescending { it.id.contains("3.5") }
+                            .thenByDescending { it.id.contains("3.8") }
+                            .thenBy { it.id }
+                    )
                 _uiState.value = _uiState.value.copy(
                     isFetchingModels = false,
-                    availableModels = combined
+                    availableModels = modelInfos.map { it.id },
+                    availableModelInfos = modelInfos
                 )
             } else {
                 val err = result.exceptionOrNull()?.message ?: "Unknown error"

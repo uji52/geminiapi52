@@ -12,17 +12,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -37,6 +40,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -54,6 +58,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.gemini.gitagent.data.repository.GeminiModelInfo
 import com.gemini.gitagent.ui.SettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -145,6 +150,40 @@ fun SettingsScreen(
             }
         }
 
+        // Free Tier Guidance Banner
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = Color(0xFFE6F4EA)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    tint = Color(0xFF137333),
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        text = "Google AI Studio 無料枠ガイド",
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF137333),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Text(
+                        text = "「flash」系モデルは事前クレジット残高 $0 でも無料枠で利用できます。「pro / argon」系は有料クレジットが必要です。",
+                        color = Color(0xFF137333),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+
         OutlinedTextField(
             value = geminiApiKey,
             onValueChange = {
@@ -181,7 +220,7 @@ fun SettingsScreen(
                 value = geminiModel,
                 onValueChange = { geminiModel = it },
                 label = { Text("Gemini Model (Select or Type)") },
-                placeholder = { Text("gemini-3.8-flash") },
+                placeholder = { Text("gemini-3.5-flash") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 trailingIcon = {
@@ -201,13 +240,95 @@ fun SettingsScreen(
                 expanded = modelDropdownExpanded,
                 onDismissRequest = { modelDropdownExpanded = false }
             ) {
-                uiState.availableModels.forEach { modelOption ->
+                uiState.availableModelInfos.forEach { modelInfo ->
                     DropdownMenuItem(
-                        text = { Text(modelOption) },
+                        text = {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = modelInfo.id,
+                                        fontWeight = if (modelInfo.isRecommended) FontWeight.Bold else FontWeight.Medium,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    // Tier Badge
+                                    Surface(
+                                        color = when {
+                                            modelInfo.isRecommended -> Color(0xFF137333)
+                                            modelInfo.isFreeTier -> Color(0xFFE6F4EA)
+                                            modelInfo.id.contains("tts") -> Color(0xFFF1F3F4)
+                                            else -> Color(0xFFFCE8E6)
+                                        },
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text(
+                                            text = modelInfo.tierLabel,
+                                            color = when {
+                                                modelInfo.isRecommended -> Color.White
+                                                modelInfo.isFreeTier -> Color(0xFF137333)
+                                                modelInfo.id.contains("tts") -> Color(0xFF5F6368)
+                                                else -> Color(0xFFC5221F)
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = modelInfo.description,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        },
                         onClick = {
-                            geminiModel = modelOption
+                            geminiModel = modelInfo.id
                             modelDropdownExpanded = false
                         }
+                    )
+                }
+            }
+        }
+
+        // Selected Model Tier Status Banner
+        val currentModelInfo = remember(geminiModel) { GeminiModelInfo.fromModelId(geminiModel) }
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = if (currentModelInfo.isFreeTier) Color(0xFFE6F4EA) else Color(0xFFFCE8E6)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = if (currentModelInfo.isFreeTier) Icons.Default.CheckCircle else Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = if (currentModelInfo.isFreeTier) Color(0xFF137333) else Color(0xFFC5221F),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        text = if (currentModelInfo.isFreeTier) "【無料枠で利用可能】${currentModelInfo.tierLabel}" else "【有料 / 要クレジット】${currentModelInfo.tierLabel}",
+                        color = if (currentModelInfo.isFreeTier) Color(0xFF137333) else Color(0xFFC5221F),
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Text(
+                        text = currentModelInfo.description,
+                        color = if (currentModelInfo.isFreeTier) Color(0xFF137333) else Color(0xFFC5221F),
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
             }

@@ -20,6 +20,58 @@ data class AppSettings(
                 githubRepo.isNotBlank()
 }
 
+data class GeminiModelInfo(
+    val id: String,
+    val displayName: String,
+    val isFreeTier: Boolean,
+    val tierLabel: String,
+    val description: String,
+    val isRecommended: Boolean = false
+) {
+    companion object {
+        fun fromModelId(modelId: String): GeminiModelInfo {
+            val clean = modelId.trim().removePrefix("models/")
+            val isTts = clean.contains("tts", ignoreCase = true)
+            val isFlash = clean.contains("flash", ignoreCase = true)
+            val isPro = clean.contains("pro", ignoreCase = true)
+            val isArgon = clean.contains("argon", ignoreCase = true)
+
+            val isFree = isFlash && !isTts
+            val isRec = clean == "gemini-3.5-flash"
+
+            val tierLabel = when {
+                isTts -> "音声特化"
+                isFree -> if (isRec) "無料枠 (推奨)" else "無料枠"
+                isPro || isArgon -> "有料 (要クレジット)"
+                else -> "要確認"
+            }
+
+            val description = when (clean) {
+                "gemini-3.5-flash" -> "★推奨: 高速・安定・無料枠対応。エージェント検証済み。"
+                "gemini-3.5-flash-lite" -> "超軽量・高速応答・無料枠対応。"
+                "gemini-3.8-flash" -> "高度推論対応・無料枠対応（※時間帯により混雑・高負荷の場合あり）。"
+                "gemini-flash-latest" -> "最新Flashモデル自動参照・無料枠対応。"
+                "gemini-3.8-pro" -> "高度推論Proモデル。無料枠対象外（要クレジット残高）。"
+                "gemini-4-argon" -> "最上位フラッグシップ。有料専用（要クレジット残高）。"
+                else -> when {
+                    isTts -> "音声生成専用モデル（コード編集・エージェントには不向き）"
+                    isFree -> "Flash系モデル。無料枠（Free Tier）で利用可能"
+                    else -> "有料課金または事前購入クレジットが必要なモデル"
+                }
+            }
+
+            return GeminiModelInfo(
+                id = clean,
+                displayName = clean,
+                isFreeTier = isFree,
+                tierLabel = tierLabel,
+                description = description,
+                isRecommended = isRec
+            )
+        }
+    }
+}
+
 class SettingsRepository(context: Context) {
 
     private val prefs: SharedPreferences = try {
