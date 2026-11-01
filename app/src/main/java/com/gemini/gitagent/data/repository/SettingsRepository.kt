@@ -11,7 +11,7 @@ data class AppSettings(
     val githubToken: String = "",
     val githubOwner: String = "",
     val githubRepo: String = "",
-    val githubBaseBranch: String = "master"
+    val githubBaseBranch: String = "main"
 ) {
     val isConfigured: Boolean
         get() = geminiApiKey.isNotBlank() &&
@@ -99,7 +99,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_GITHUB_REPO = "github_repo"
         private const val KEY_GITHUB_BASE_BRANCH = "github_base_branch"
         const val DEFAULT_MODEL = "gemini-3.5-flash"
-        const val DEFAULT_BRANCH = "master"
+        const val DEFAULT_BRANCH = "main"
     }
 
     fun getSettings(): AppSettings {

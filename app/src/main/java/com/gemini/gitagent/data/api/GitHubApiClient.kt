@@ -111,7 +111,12 @@ class GitHubApiClient(
                 if (response.isSuccessful) {
                     val json = JSONObject(body)
                     val defaultBranch = json.optString("default_branch", "main")
-                    Result.success("Connected to $owner/$repo (default branch: $defaultBranch)")
+                    val size = json.optInt("size", 0)
+                    if (size == 0) {
+                        Result.success("Connected to $owner/$repo. Warning: Repository appears empty (size 0). Ensure an initial commit is pushed to '$defaultBranch'.")
+                    } else {
+                        Result.success("Connected to $owner/$repo (default branch: $defaultBranch)")
+                    }
                 } else {
                     Result.failure(IOException("GitHub Error ${response.code}: $body"))
                 }
@@ -198,7 +203,12 @@ class GitHubApiClient(
             client.newCall(request).execute().use { response ->
                 val body = response.body?.string() ?: ""
                 if (!response.isSuccessful) {
-                    return@withContext Result.failure(IOException("Failed to get head SHA for branch '$cleanBranch': ${response.code} $body"))
+                    val detail = if (response.code == 404) {
+                        "Branch '$cleanBranch' not found on '$owner/$repo'. If the repository is empty, please push an initial commit first."
+                    } else {
+                        body
+                    }
+                    return@withContext Result.failure(IOException("Failed to get head SHA for branch '$cleanBranch': ${response.code} $detail"))
                 }
                 val json = JSONObject(body)
                 val obj = json.getJSONObject("object")

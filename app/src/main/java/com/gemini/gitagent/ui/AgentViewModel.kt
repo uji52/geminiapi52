@@ -113,7 +113,15 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                         is AgentEvent.Completed -> {
-                            addLog(LogType.SUCCESS, "Task completed successfully!")
+                            val currentPr = _uiState.value.latestPrUrl
+                            if (!currentPr.isNullOrBlank()) {
+                                addLog(LogType.SUCCESS, "Task completed successfully! Pull Request: $currentPr")
+                            } else {
+                                if (event.message.isNotBlank()) {
+                                    addLog(LogType.INFO, "Gemini: ${event.message}")
+                                }
+                                addLog(LogType.ERROR, "Task finished, but NO Pull Request was created.")
+                            }
                             _uiState.value = _uiState.value.copy(
                                 isRunning = false,
                                 latestSummary = event.message

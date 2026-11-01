@@ -58,12 +58,13 @@ flowchart TD
 
 ## 🛠️ 提供される Gemini Tools (Function Calling)
 
-アプリは以下の 5 つの Git/GitHub 操作ツールを Gemini に提供します：
+アプリは以下の Git/GitHub 操作ツールを Gemini に提供します（無料枠の API 呼び出し数を最小化するため、複合ツール `create_branch_and_commit_pr` を優先使用します）：
 
 | ツール名 | 説明 |
 | :--- | :--- |
-| `list_directory` | 対象リポジトリ内の指定パスにあるファイル・ディレクトリ一覧を取得 |
+| `create_branch_and_commit_pr` | **★省リクエスト複合ツール**: ブランチ作成・コミット・PR起票を 1 ステップで一括実行（API呼び出しを大幅節約） |
 | `get_file_content` | 指定したファイルの最新テキスト内容を取得 |
+| `list_directory` | 対象リポジトリ内の指定パスにあるファイル・ディレクトリ一覧を取得 |
 | `create_branch` | ベースブランチから新しい作業ブランチ（`gemini/...`）を作成 |
 | `commit_and_push_file` | 変更または新規作成したファイルを指定ブランチにコミット |
 | `create_pull_request` | 作業ブランチからベースブランチへのプルリクエストを起票 |

@@ -36,18 +36,31 @@ class AgentRepository(
     fun executeTask(userPrompt: String): Flow<AgentEvent> = flow {
         emit(AgentEvent.Status("Initializing autonomous agent for ${settings.githubOwner}/${settings.githubRepo}..."))
 
+        // Pre-flight check: Verify base branch exists before consuming any Gemini API calls
+        val baseCheckResult = githubClient.getBranchHeadSha(settings.githubBaseBranch)
+        if (baseCheckResult.isFailure) {
+            val err = baseCheckResult.exceptionOrNull()?.message ?: "Base branch check failed"
+            emit(AgentEvent.Error("GitHub Setup Error: $err\nPlease check that '${settings.githubBaseBranch}' exists on GitHub and that the repository has at least one commit."))
+            return@flow
+        }
+
         val systemPrompt = """
             You are an autonomous AI Software Engineer agent capable of modifying code and creating Pull Requests on GitHub.
             The user wants you to perform a task in GitHub repository '${settings.githubOwner}/${settings.githubRepo}'.
             The default base branch is '${settings.githubBaseBranch}'.
 
-            Rules and Guidelines:
-            1. Always inspect the codebase using 'list_directory' and 'get_file_content' before making changes.
-            2. When modifying or adding code, create a new feature branch first using 'create_branch' (e.g. 'gemini/update-xxx' or 'gemini/fix-yyy').
-            3. Apply modifications by calling 'commit_and_push_file' with a clean, descriptive commit message.
-            4. Once all necessary file changes are committed, create a Pull Request using 'create_pull_request' into '${settings.githubBaseBranch}'.
-            5. Provide a clear markdown explanation in the PR body.
-            6. When finished, provide a concise summary to the user including the created Pull Request URL.
+            CRITICAL EFFICIENCY REQUIREMENT (Free Tier / Budget Friendly):
+            - The user is on a strict Free Tier quota (max 5 requests). You MUST complete the entire task in as few steps as possible (ideally 1 or 2 steps).
+            - Whenever creating or modifying a single file, you MUST use the composite tool 'create_branch_and_commit_pr'. It automatically creates the branch, commits the file, and opens the Pull Request all in ONE step.
+            - If the target file path is already known or mentioned by the user (e.g. 'README.md', 'LICENSE', etc.), DO NOT call 'list_directory'.
+            - If you are creating a new file or overwriting a file whose structure is known, call 'create_branch_and_commit_pr' immediately on your first turn.
+            - If you need to read an existing file first, call 'get_file_content' in step 1, and then call 'create_branch_and_commit_pr' in step 2.
+            - Avoid unnecessary exploratory calls. Focus directly on completing the user's objective.
+
+            CRITICAL TOOL EXECUTION RULE:
+            - You MUST invoke tools to perform real GitHub actions.
+            - NEVER reply with plain text pretending that a PR or commit was created without calling the tool.
+            - When asked to create a PR, calling 'create_branch_and_commit_pr' is MANDATORY.
         """.trimIndent()
 
         val contents = JSONArray()
@@ -63,7 +76,7 @@ class AgentRepository(
         var prUrl: String? = null
         var isFinished = false
         var stepCount = 0
-        val maxSteps = 15
+        val maxSteps = 4
 
         while (!isFinished && stepCount < maxSteps) {
             stepCount++
@@ -116,6 +129,8 @@ class AgentRepository(
 
             // Execute each function call and append function responses
             val responseParts = JSONArray()
+            var prCreatedInThisTurn = false
+
             for (fn in functionCalls) {
                 val toolName = fn.functionName
                 val args = fn.args
@@ -126,11 +141,12 @@ class AgentRepository(
 
                 emit(AgentEvent.ToolResult(toolName, summaryText))
 
-                if (toolName == "create_pull_request" && toolResultJson.optBoolean("success", false)) {
+                if ((toolName == "create_pull_request" || toolName == "create_branch_and_commit_pr") && toolResultJson.optBoolean("success", false)) {
                     val url = toolResultJson.optString("html_url", "")
                     val number = toolResultJson.optInt("number", 0)
                     val title = toolResultJson.optString("title", "")
                     prUrl = url
+                    prCreatedInThisTurn = true
                     emit(AgentEvent.PullRequestCreated(url, number, title))
                 }
 
@@ -143,6 +159,13 @@ class AgentRepository(
                         })
                     })
                 })
+            }
+
+            // If PR was successfully created, finish immediately to save Gemini API requests
+            if (prCreatedInThisTurn && prUrl != null) {
+                emit(AgentEvent.Completed("Pull Request successfully created: $prUrl"))
+                isFinished = true
+                break
             }
 
             // Append user turn containing all functionResponses (Gemini API requires role='user')
@@ -162,6 +185,56 @@ class AgentRepository(
     private suspend fun executeTool(name: String, args: JSONObject): Pair<JSONObject, String> {
         val result = JSONObject()
         return when (name) {
+            "create_branch_and_commit_pr" -> {
+                val branchName = args.optString("branch_name", "").ifEmpty { "gemini/update-${System.currentTimeMillis() / 1000}" }
+                val filePath = args.optString("file_path", "")
+                val fileContent = args.optString("file_content", "")
+                val commitMsg = args.optString("commit_message", "Updated by Gemini Git Agent")
+                val prTitle = args.optString("pr_title", "Update via Gemini Git Agent")
+                val prBody = args.optString("pr_body", "Autonomous changes committed by Gemini Git Agent.")
+                val baseBranch = args.optString("base_branch", "").ifEmpty { settings.githubBaseBranch }
+
+                if (filePath.isBlank()) {
+                    result.put("success", false)
+                    result.put("error", "file_path is required")
+                    return Pair(result, "Failed: file_path is missing")
+                }
+
+                // 1. Create feature branch
+                val branchResult = githubClient.createBranch(branchName, baseBranch)
+                if (branchResult.isFailure) {
+                    val err = branchResult.exceptionOrNull()?.message ?: "Failed to create branch"
+                    result.put("success", false)
+                    result.put("error", err)
+                    return Pair(result, "Branch creation error: $err")
+                }
+
+                // 2. Commit and push file changes
+                val commitResult = githubClient.commitAndPushFile(filePath, fileContent, commitMsg, branchName)
+                if (commitResult.isFailure) {
+                    val err = commitResult.exceptionOrNull()?.message ?: "Failed to commit changes"
+                    result.put("success", false)
+                    result.put("error", err)
+                    return Pair(result, "Commit failed for '$filePath': $err")
+                }
+
+                // 3. Create Pull Request
+                val prResult = githubClient.createPullRequest(prTitle, prBody, branchName, baseBranch)
+                if (prResult.isFailure) {
+                    val err = prResult.exceptionOrNull()?.message ?: "Failed to create PR"
+                    result.put("success", false)
+                    result.put("error", err)
+                    return Pair(result, "PR creation failed: $err")
+                }
+
+                val pr = prResult.getOrThrow()
+                result.put("success", true)
+                result.put("number", pr.number)
+                result.put("html_url", pr.htmlUrl)
+                result.put("title", pr.title)
+                result.put("branch", branchName)
+                Pair(result, "All-in-one PR created successfully! #${pr.number}: ${pr.htmlUrl}")
+            }
             "list_directory" -> {
                 val path = args.optString("path", "")
                 val listResult = githubClient.listDirectory(path, settings.githubBaseBranch)

@@ -283,6 +283,52 @@ class GeminiApiClient(
     private fun buildFunctionDeclarations(): JSONArray {
         val array = JSONArray()
 
+        // 0. create_branch_and_commit_pr (All-in-one tool to minimize API calls)
+        array.put(JSONObject().apply {
+            put("name", "create_branch_and_commit_pr")
+            put("description", "Recommended all-in-one tool. Creates a new branch, commits the file changes, and opens a Pull Request in a single operation. Use this to complete tasks in the fewest possible steps.")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("branch_name", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "New branch name (e.g. 'gemini/update-readme')")
+                    })
+                    put("file_path", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Target file path to create or modify (e.g. 'README.md')")
+                    })
+                    put("file_content", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Full updated text content of the file")
+                    })
+                    put("commit_message", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Git commit message")
+                    })
+                    put("pr_title", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Title of the Pull Request")
+                    })
+                    put("pr_body", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Markdown description for the Pull Request")
+                    })
+                    put("base_branch", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Optional base branch (defaults to repository default branch)")
+                    })
+                })
+                put("required", JSONArray().apply {
+                    put("branch_name")
+                    put("file_path")
+                    put("file_content")
+                    put("commit_message")
+                    put("pr_title")
+                })
+            })
+        })
+
         // 1. list_directory
         array.put(JSONObject().apply {
             put("name", "list_directory")
